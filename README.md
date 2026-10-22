@@ -159,7 +159,7 @@ If deploying to Supabase or cloud PostgreSQL:
 1. **Accessing Admin Panel**: Click "FLIGHT COMMAND" on the top navigation bar.
 2. **Default Credentials**:
    - Username: `admin`
-   - Password: `interstellar2026` *(Change in `.env` before production)*
+   - Password: `emo` *(Change in `.env` before production)*
 3. **Managing Questions**:
    - Click "NEW QUESTION" to create custom college fest questions.
    - Use "IMPORT JSON" to bulk-import questions from other fests.
