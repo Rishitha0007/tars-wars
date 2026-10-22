@@ -1,0 +1,9 @@
+
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://tars-wars.onrender.com/api/:path*"
+    }
+  ]
+}
