@@ -55,7 +55,6 @@ export const PaperRocketTransition: React.FC<PaperRocketTransitionProps> = ({
       }, 300);
 
       const t2 = setTimeout(() => {
-        if (onQuestionSwitchPoint) onQuestionSwitchPoint();
         onTransitionComplete();
         setPhase('idle');
       }, 1200);

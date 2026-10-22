@@ -8,48 +8,42 @@ import {
   AlertCircle,
   HelpCircle,
 } from 'lucide-react';
-import { QuestionBankItem } from '../data/questions.js';
-import {
-  QuizSession,
-  UserAnswerRecord,
-  getActiveQuizSession,
-  updateActiveQuizSession,
-  finalizeQuizSession,
-  startNewQuizSession,
-} from '../services/quizSession.js';
 import { TarsRobot, TarsState } from '../components/TarsRobot.js';
 import { PaperRocketTransition } from '../components/PaperRocketTransition.js';
 import { RemainingTimeHud } from '../components/RemainingTimeHud.js';
 import { sound } from '../services/sound.js';
-import { QuizResults } from '../types/index.js';
+import { api } from '../services/api.js';
+import { QuestionClient, QuizResults } from '../types/index.js';
 
 interface QuizMissionPageProps {
+  attemptId: string;
   rollNumber: string;
+  initialQuestion?: QuestionClient;
   onQuizCompleted: (results: QuizResults) => void;
 }
 
 export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
+  attemptId,
   rollNumber,
+  initialQuestion,
   onQuizCompleted,
 }) => {
-  // Session initialization (retrieves active or initializes 20 random questions)
-  const [session, setSession] = useState<QuizSession>(() => {
-    const active = getActiveQuizSession();
-    if (active && active.rollNumber === rollNumber.trim().toUpperCase()) {
-      return active;
-    }
-    return startNewQuizSession(rollNumber);
-  });
+  // Authoritative question state from server
+  const [currentQuestion, setCurrentQuestion] = useState<QuestionClient | null>(initialQuestion || null);
+  const [loading, setLoading] = useState<boolean>(!initialQuestion);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const [currentIdx, setCurrentIdx] = useState<number>(session.currentIdx || 0);
-  const [score, setScore] = useState<number>(session.score || 0);
-  const [energy, setEnergy] = useState<number>(session.energyPercentage || 0);
+  // Score & Energy
+  const [score, setScore] = useState<number>(initialQuestion?.score || 0);
+  const [energy, setEnergy] = useState<number>(initialQuestion?.energyPercentage || 0);
 
-  // FEATURE 1: Selection vs Submission state
+  // Selection vs Submission state
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
   const [isCorrect, setIsCorrect] = useState<boolean>(false);
   const [isTimeoutUnanswered, setIsTimeoutUnanswered] = useState<boolean>(false);
+  const [explanation, setExplanation] = useState<string>('');
+  const [serverCorrectOptionIndex, setServerCorrectOptionIndex] = useState<number | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
   // TARS robot animation state
@@ -57,177 +51,268 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
 
   // Paper rocket transition state
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
-  const nextIdxRef = useRef<number>(0);
   const isSubmittingRef = useRef<boolean>(false);
   const autoAdvanceTimerRef = useRef<any>(null);
+  const pendingNextQuestionRef = useRef<QuestionClient | null>(null);
 
-  // Question bank list for this attempt (exactly 20 unique questions)
-  const questions: QuestionBankItem[] = session.questions;
-  const totalQuestions = questions.length;
-  const currentQ: QuestionBankItem = questions[currentIdx] || questions[0];
-  const isLastQuestion = currentIdx === totalQuestions - 1;
+  const [isFinalMission, setIsFinalMission] = useState<boolean>(false);
+  const isFinalMissionRef = useRef<boolean>(false);
 
-  // Cleanup pending auto-advance timers on unmount
+  const totalQuestions = currentQuestion?.totalQuestions || 20;
+  const currentSeq = currentQuestion?.sequenceNumber || 1;
+  const isLastQuestion = currentSeq === totalQuestions;
+
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
     };
   }, []);
 
-  // Update session state in localStorage when question index or score changes
+  // Fetch or restore attempt state if not supplied via props
   useEffect(() => {
-    updateActiveQuizSession({
-      currentIdx,
-      score,
-      energyPercentage: energy,
-    });
-  }, [currentIdx, score, energy]);
+    if (!currentQuestion && attemptId) {
+      const loadAttemptState = async () => {
+        try {
+          setLoading(true);
+          setFetchError(null);
+          const data = await api.getAttempt(attemptId);
+          if (data.isCompleted) {
+            const results = await api.getResults(attemptId);
+            onQuizCompleted(results);
+            return;
+          }
+          if (data.currentQuestion) {
+            setCurrentQuestion(data.currentQuestion);
+            setScore(data.score);
+            setEnergy(data.energyPercentage);
+            if (data.currentQuestion.isAnswered) {
+              setIsAnswered(true);
+              setIsCorrect(!!data.currentQuestion.isCorrect);
+              setSelectedOption(data.currentQuestion.selectedOptionIndex);
+            }
+          }
+        } catch (err: any) {
+          setFetchError(err.message || 'Failed to restore mission telemetry');
+        } finally {
+          setLoading(false);
+        }
+      };
 
-  // FEATURE 1.1: Clicking an option ONLY highlights it, does NOT submit or evaluate
+      loadAttemptState();
+    }
+  }, [attemptId, currentQuestion]);
+
+  // Handle Option Click: ONLY highlights the option locally, does NOT evaluate
   const handleSelectOption = (optionIndex: number) => {
     if (isAnswered || isTransitioning || isSubmittingRef.current) return;
 
     sound.playChirp();
     setSelectedOption(optionIndex);
-    setValidationMessage(null); // Clear any warning
+    setValidationMessage(null);
   };
 
-  // FEATURE 1.4 & 1.5: REMOVE SELECTED OPTION button
+  // REMOVE SELECTED OPTION button
   const handleRemoveSelectedOption = () => {
     if (isAnswered || isTransitioning || isSubmittingRef.current) return;
 
     sound.playChirp();
     setSelectedOption(null);
     setValidationMessage(null);
+    setTarsState('idle');
   };
 
-  // Common submission logic for NEXT click or Timer expiry
-  const executeSubmission = (chosenOption: number | null, isTimeout: boolean = false) => {
-    if (isAnswered || isTransitioning || isSubmittingRef.current) return;
+  // Authoritative Submission via Server API
+  const executeSubmission = async (chosenOption: number | null, isTimeout: boolean = false) => {
+    if (isAnswered || isTransitioning || isSubmittingRef.current || !currentQuestion) return;
     isSubmittingRef.current = true;
-    setIsAnswered(true);
     setValidationMessage(null);
 
-    const isUnanswered = chosenOption === null;
-    const correct = !isUnanswered && chosenOption === currentQ.correctOptionIndex;
+    try {
+      if (isTimeout || chosenOption === null) {
+        // Report timeout to server
+        const res = await api.reportTimeout(attemptId, currentSeq);
+        setIsAnswered(true);
+        setIsCorrect(false);
+        setIsTimeoutUnanswered(true);
+        setExplanation(res.explanation);
+        setServerCorrectOptionIndex(res.correctOptionIndex);
+        setScore(res.score);
+        setEnergy(res.energyPercentage);
 
-    setIsCorrect(correct);
-    setIsTimeoutUnanswered(isUnanswered);
+        sound.playWrong();
+        setTarsState('collapsing');
 
-    // FEATURE 2: Update energy & score only once per question
-    const newScore = correct ? score + 1 : score;
-    const newEnergy = newScore * 5; // +5 percentage points per correct answer (20 = 100%)
+        if (res.isLastQuestion || currentSeq >= totalQuestions) {
+          isFinalMissionRef.current = true;
+          setIsFinalMission(true);
+        }
 
-    setScore(newScore);
-    setEnergy(newEnergy);
+        // Schedule rocket transition or mission completion
+        autoAdvanceTimerRef.current = setTimeout(() => {
+          setTarsState('idle');
+          handleProceedNext(res.isLastQuestion);
+        }, 2400);
+      } else {
+        // Authoritative server evaluation
+        const res = await api.submitAnswer(attemptId, currentSeq, chosenOption);
+        setIsAnswered(true);
+        setIsCorrect(res.isCorrect);
+        setIsTimeoutUnanswered(false);
+        setExplanation(res.explanation);
+        setServerCorrectOptionIndex(res.correctOptionIndex);
+        setScore(res.score);
+        setEnergy(res.energyPercentage);
 
-    // Build audited user answer record
-    const record: UserAnswerRecord = {
-      questionId: currentQ.id,
-      sourcePdf: currentQ.sourcePdf,
-      originalQNum: currentQ.originalQNum,
-      questionText: currentQ.questionText,
-      category: currentQ.category,
-      options: currentQ.options,
-      selectedOptionIndex: chosenOption,
-      selectedOptionText: chosenOption !== null ? currentQ.options[chosenOption] : '[UNANSWERED / EXPIRED]',
-      correctOptionIndex: currentQ.correctOptionIndex,
-      correctOptionText: currentQ.correctOptionText,
-      isCorrect: correct,
-      isUnanswered: isUnanswered,
-      explanation: currentQ.explanation,
-    };
+        if (res.isLastQuestion || currentSeq >= totalQuestions) {
+          isFinalMissionRef.current = true;
+          setIsFinalMission(true);
+        }
 
-    // Update session answers
-    const updatedAnswers = [...session.userAnswers, record];
-    const updatedSession = {
-      ...session,
-      score: newScore,
-      energyPercentage: newEnergy,
-      userAnswers: updatedAnswers,
-    };
-    setSession(updatedSession);
-    updateActiveQuizSession(updatedSession);
+        if (res.isCorrect) {
+          sound.playCorrect();
+          setTarsState('dancing');
+        } else {
+          sound.playWrong();
+          setTarsState('collapsing');
+        }
 
-    // FEATURE 2: TARS Robot Reaction
-    if (correct) {
-      sound.playCorrect();
-      setTarsState('dancing');
-    } else {
-      sound.playWrong();
-      setTarsState('collapsing');
+        autoAdvanceTimerRef.current = setTimeout(() => {
+          setTarsState('idle');
+          handleProceedNext(res.isLastQuestion);
+        }, 2400);
+      }
+    } catch (err: any) {
+      isSubmittingRef.current = false;
+      setValidationMessage(err.message || 'Error processing telemetry response.');
     }
-
-    // FEATURE 3: Smooth timing - after feedback & robot reaction played (2400ms), launch rocket transition
-    autoAdvanceTimerRef.current = setTimeout(() => {
-      setTarsState('idle');
-      handleProceedNext();
-    }, 2400);
   };
 
-  // FEATURE 1.6: NEXT button click handler
+  // NEXT button click handler
   const handleNextClick = () => {
     if (isAnswered || isTransitioning || isSubmittingRef.current) return;
 
     if (selectedOption === null) {
-      // Show small polished message without submitting
       sound.playChirp();
       setValidationMessage('Select an answer or wait for the timer to expire.');
       return;
     }
 
-    // Submit and lock selected option
     executeSubmission(selectedOption, false);
   };
 
-  // FEATURE 1.10 & 7: 45-second timer expiration
+  // 45-second timer expiration
   const handleTimerExpire = () => {
     if (isAnswered || isTransitioning || isSubmittingRef.current) return;
-
-    // Automatically submit selected option if any, else submit as unanswered
     executeSubmission(selectedOption, true);
   };
 
-  // Advance to Next Question (Paper Rocket Transition trigger)
-  const handleProceedNext = () => {
+  // Advance to Next Question (triggers Paper Rocket 3D transition)
+  const handleProceedNext = async (forceLast: boolean = false) => {
     if (isTransitioning) return;
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
       autoAdvanceTimerRef.current = null;
     }
 
-    if (isLastQuestion) {
-      // Final launch into singularity results
+    const isFinal = forceLast || isFinalMissionRef.current || (isAnswered && isLastQuestion);
+    if (isFinal) {
+      isFinalMissionRef.current = true;
+      setIsFinalMission(true);
       setIsTransitioning(true);
       return;
     }
 
-    nextIdxRef.current = currentIdx + 1;
-    setIsTransitioning(true);
+    try {
+      // Pre-fetch next question from server so it's ready when card flips
+      const nextData = await api.advanceQuestion(attemptId);
+      if (nextData.completed) {
+        isFinalMissionRef.current = true;
+        setIsFinalMission(true);
+        setIsTransitioning(true);
+        return;
+      }
+      pendingNextQuestionRef.current = nextData.nextQuestion;
+      setIsTransitioning(true);
+    } catch (err: any) {
+      // If error advancing, retry
+      setValidationMessage(err.message || 'Failed to initialize next orbital sector');
+    }
   };
 
   // Mid-transition hook: switch card data while rocket is flying off-screen
   const handleQuestionSwitchPoint = () => {
-    setCurrentIdx(nextIdxRef.current);
+    if (isFinalMissionRef.current) {
+      return;
+    }
+
+    if (pendingNextQuestionRef.current) {
+      setCurrentQuestion(pendingNextQuestionRef.current);
+      pendingNextQuestionRef.current = null;
+    }
     setSelectedOption(null);
     setIsAnswered(false);
     setIsCorrect(false);
     setIsTimeoutUnanswered(false);
+    setExplanation('');
+    setServerCorrectOptionIndex(null);
     setValidationMessage(null);
     setTarsState('idle');
     isSubmittingRef.current = false;
   };
 
   // Transition complete
-  const handleTransitionComplete = () => {
+  const handleTransitionComplete = async () => {
     setIsTransitioning(false);
-    if (isLastQuestion && isAnswered) {
-      const finalResults = finalizeQuizSession(session);
-      onQuizCompleted(finalResults);
+    if (isFinalMissionRef.current) {
+      try {
+        setLoading(true);
+        const finalResults = await api.getResults(attemptId);
+        onQuizCompleted(finalResults);
+      } catch (err: any) {
+        try {
+          const attemptData = await api.getAttempt(attemptId);
+          if (attemptData.isCompleted) {
+            const finalResults = await api.getResults(attemptId);
+            onQuizCompleted(finalResults);
+            return;
+          }
+        } catch {}
+        setFetchError('Error retrieving final mission debrief.');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
   const padSeq = (n: number) => n.toString().padStart(2, '0');
+
+  if (loading) {
+    return (
+      <div className="relative z-10 flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        <p className="font-mono text-cyan-300 text-xs tracking-wider">
+          SYNCHRONIZING TARS QUANTUM TELEMETRY...
+        </p>
+      </div>
+    );
+  }
+
+  if (fetchError || !currentQuestion) {
+    return (
+      <div className="relative z-10 max-w-lg mx-auto p-6 glass-panel rounded-2xl border border-rose-500/40 text-center">
+        <AlertCircle className="w-8 h-8 text-rose-400 mx-auto mb-3" />
+        <h2 className="font-orbitron font-bold text-lg text-rose-200">TELEMETRY LINK SEVERED</h2>
+        <p className="text-xs font-mono text-slate-300 mt-2">{fetchError || 'Unable to connect to orbital database.'}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-5 px-5 py-2 rounded-xl btn-primary text-xs font-mono"
+        >
+          RECONNECT TELEMETRY
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="relative z-10 w-full max-w-[1600px] mx-auto px-4 sm:px-8 lg:px-12 py-3 sm:py-5 flex flex-col gap-6 flex-1 justify-center">
@@ -235,36 +320,36 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
       {/* HEADER: Identity, Question Progress & Remaining Time HUD Row */}
       <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 sm:p-5 rounded-2xl glass-panel border border-cyan-500/25 shadow-xl">
         
-        {/* Left: Sequence Badge & Pilot Info (md:col-span-4) */}
+        {/* Left: Sequence Badge & Pilot Info */}
         <div className="md:col-span-4 flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-xl bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center font-orbitron font-black text-cyan-300 text-sm sm:text-base shadow-[0_0_12px_rgba(0,229,255,0.3)] shrink-0">
-            #{padSeq(currentIdx + 1)}
+            #{padSeq(currentSeq)}
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs text-slate-400">PILOT:</span>
               <span className="font-mono font-bold text-sm text-cyan-200 tracking-wider">
-                {rollNumber || '21BCE1042'}
+                {rollNumber}
               </span>
             </div>
             <p className="text-[11px] font-space text-cyan-400 font-semibold uppercase tracking-wider">
-              QUESTION {padSeq(currentIdx + 1)} / {padSeq(totalQuestions)} // {currentQ.category}
+              QUESTION {padSeq(currentSeq)} / {padSeq(totalQuestions)} // {currentQuestion.category}
             </p>
           </div>
         </div>
 
-        {/* Center: Mission Progress Visualizer (md:col-span-4) */}
+        {/* Center: Mission Progress Visualizer */}
         <div className="md:col-span-4 flex flex-col items-center gap-1.5 w-full">
           <div className="w-full flex justify-between text-[11px] font-mono text-slate-400">
             <span>MISSION PROGRESS</span>
             <span className="text-cyan-300 font-bold">
-              {Math.round(((currentIdx + 1) / totalQuestions) * 100)}%
+              {Math.round((currentSeq / totalQuestions) * 100)}%
             </span>
           </div>
           <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800 flex gap-1">
             {Array.from({ length: totalQuestions }).map((_, idx) => {
-              const isPast = idx < currentIdx;
-              const isCurrent = idx === currentIdx;
+              const isPast = idx < currentSeq - 1;
+              const isCurrent = idx === currentSeq - 1;
 
               return (
                 <div
@@ -282,53 +367,53 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
           </div>
         </div>
 
-        {/* Right: Remaining Time HUD (md:col-span-4, right aligned) */}
+        {/* Right: Remaining Time HUD */}
         <div className="md:col-span-4 flex justify-start md:justify-end items-center">
           <RemainingTimeHud
-            key={`timer_${currentIdx}`}
-            initialSeconds={45}
+            key={`timer_${currentSeq}`}
+            initialSeconds={currentQuestion.remainingSeconds !== undefined ? currentQuestion.remainingSeconds : 45}
             onExpire={handleTimerExpire}
             isPaused={isAnswered || isTransitioning}
           />
         </div>
       </div>
 
-      {/* MAIN AREA: Responsive Two-Column Composition (58% Question Panel + 42% TARS Robot) */}
+      {/* MAIN AREA: Responsive Two-Column Composition */}
       <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 xl:gap-12 items-center flex-1">
         
-        {/* Left Column: Question Panel with Paper Rocket Transition (lg:col-span-7 = 58.3%) */}
+        {/* Left Column: Question Panel with Paper Rocket Transition */}
         <div className="lg:col-span-7 flex flex-col justify-center w-full">
           
           <PaperRocketTransition
             isTransitioning={isTransitioning}
-            isFinalQuestion={isLastQuestion}
+            isFinalQuestion={isFinalMission || isLastQuestion}
             onTransitionComplete={handleTransitionComplete}
             onQuestionSwitchPoint={handleQuestionSwitchPoint}
           >
             {/* Elevated Deep Translucent Navy Question Card */}
             <div className="glass-panel p-6 sm:p-8 xl:p-10 rounded-2xl border border-cyan-500/35 shadow-2xl hud-corner w-full flex flex-col">
               
-              {/* Category & Source Metadata Badges */}
+              {/* Category & Status Metadata Badges */}
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-800/80 mb-5">
                 <span className="px-3 py-1 rounded-md bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 text-xs font-mono font-semibold tracking-wider">
-                  {currentQ.category}
+                  {currentQuestion.category}
                 </span>
                 <span className="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-cyan-400" />
-                  ORIGIN: <span className="text-slate-200 font-bold">{currentQ.sourcePdf} // Q{currentQ.originalQNum}</span>
+                  AUTHENTICATED SECTOR: <span className="text-slate-200 font-bold">Q{padSeq(currentSeq)}</span>
                 </span>
               </div>
 
               {/* Question Text */}
               <h2 className="text-lg sm:text-xl xl:text-2xl font-space font-medium text-slate-100 leading-snug mb-6 min-h-[3.25rem] flex items-center">
-                {currentQ.questionText}
+                {currentQuestion.questionText}
               </h2>
 
-              {/* Four Large Polished Answer Choices */}
+              {/* Four Answer Choices */}
               <div className="flex flex-col gap-3.5 mb-4">
-                {currentQ.options.map((optionText, index) => {
+                {currentQuestion.options.map((optionText, index) => {
                   const isSelected = selectedOption === index;
-                  const isCorrectAnswer = isAnswered && currentQ.correctOptionIndex === index;
+                  const isCorrectAnswer = isAnswered && serverCorrectOptionIndex === index;
                   const isWrongAnswer = isAnswered && isSelected && !isCorrect;
 
                   let optionStyles =
@@ -346,7 +431,6 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                         'bg-slate-950/50 border-slate-800/50 text-slate-500 opacity-60';
                     }
                   } else if (isSelected) {
-                    // FEATURE 1.1 & 1.3: Selection Highlight (not locked yet)
                     optionStyles =
                       'bg-cyan-950/90 border-cyan-400 text-cyan-100 shadow-[0_0_18px_rgba(0,229,255,0.4)] ring-1 ring-cyan-400/80 scale-[1.01]';
                   }
@@ -382,7 +466,6 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                         <span className="leading-snug">{optionText}</span>
                       </div>
 
-                      {/* Status Icon (Only displayed AFTER submission) */}
                       {isAnswered && (
                         <div>
                           {isCorrectAnswer && (
@@ -398,7 +481,7 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                 })}
               </div>
 
-              {/* FEATURE 1.4 & 1.5: REMOVE SELECTED OPTION button */}
+              {/* REMOVE SELECTED OPTION button */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                 <button
                   type="button"
@@ -423,7 +506,7 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                 )}
               </div>
 
-              {/* FEATURE 1.6: Validation message when NEXT clicked without an option */}
+              {/* Validation message */}
               {validationMessage && !isAnswered && (
                 <div className="mt-3.5 p-3 rounded-xl bg-amber-950/70 border border-amber-500/50 text-amber-200 text-xs font-mono flex items-center gap-2.5 animate-fadeIn shadow-lg">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -431,7 +514,7 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                 </div>
               )}
 
-              {/* Answer Feedback & Explanation Box (Only shown AFTER submission) */}
+              {/* Answer Feedback & Explanation Box */}
               {isAnswered && (
                 <div
                   className={`mt-5 p-4 rounded-xl border text-xs sm:text-sm transition-all duration-300 animate-fadeIn ${
@@ -459,9 +542,11 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                       </>
                     )}
                   </div>
-                  <p className="text-slate-300 font-space font-light leading-relaxed">
-                    {currentQ.explanation}
-                  </p>
+                  {explanation && (
+                    <p className="text-slate-300 font-space font-light leading-relaxed">
+                      {explanation}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -482,19 +567,18 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                  {/* NEXT Button */}
                   <button
                     type="button"
-                    onClick={isAnswered ? handleProceedNext : handleNextClick}
+                    onClick={isAnswered ? () => handleProceedNext(isLastQuestion || isFinalMission) : handleNextClick}
                     disabled={isTransitioning}
                     className="w-full sm:w-auto py-3.5 px-8 rounded-xl btn-primary flex items-center justify-center gap-3 text-xs sm:text-sm font-bold tracking-wider group shadow-xl cursor-pointer disabled:opacity-60"
                   >
                     <span>
                       {isAnswered
-                        ? isLastQuestion
+                        ? (isLastQuestion || isFinalMission)
                           ? 'COMPLETE MISSION // ENTER SINGULARITY'
                           : 'NEXT CHALLENGE // LAUNCH ROCKET'
-                        : isLastQuestion
+                        : (isLastQuestion || isFinalMission)
                         ? 'SUBMIT FINAL PROTOCOL'
                         : 'NEXT // SUBMIT ANSWER'}
                     </span>
@@ -506,7 +590,7 @@ export const QuizMissionPage: React.FC<QuizMissionPageProps> = ({
           </PaperRocketTransition>
         </div>
 
-        {/* Right Column: Tactical TARS Mech Robot (lg:col-span-5 = 41.7%) */}
+        {/* Right Column: Tactical TARS Mech Robot */}
         <div className="lg:col-span-5 flex flex-col items-center justify-center w-full">
           <TarsRobot
             energyPercentage={energy}

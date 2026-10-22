@@ -5,6 +5,7 @@ import {
   updateActiveQuizSession,
   finalizeQuizSession,
   getLocalLeaderboard,
+  getLastResults,
 } from './quizSession.js';
 
 // Simple in-memory localStorage mock for node test environment
@@ -154,5 +155,19 @@ describe('TARS WARS Full Quiz Flow Integration Tests (Features 1, 2, 6, 7, 8)', 
     expect(found).toBeDefined();
     expect(found?.score).toBe(18);
     expect(found?.energyPercentage).toBe(90);
+  });
+
+  it('Feature 9: Quiz results persistence ensures ResultsPage receives data even after attempt is cleared', () => {
+    const session = startNewQuizSession('PILOT_PERSIST_TEST');
+    const results = finalizeQuizSession(session);
+
+    // Active attempt is cleared from localStorage upon completion
+    expect(localStorage.getItem('tars_wars_active_attempt_id')).toBeNull();
+
+    // Last results are persisted and available for ResultsPage
+    const cached = getLastResults();
+    expect(cached).not.toBeNull();
+    expect(cached?.rollNumber).toBe('PILOT_PERSIST_TEST');
+    expect(cached?.attemptId).toBe(results.attemptId);
   });
 });

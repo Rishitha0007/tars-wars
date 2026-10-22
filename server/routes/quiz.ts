@@ -38,7 +38,11 @@ router.post('/start', (req: Request, res: Response) => {
       currentQuestion: result.currentQuestion,
     });
   } catch (error: any) {
-    return res.status(400).json({ error: error.message || 'Failed to initialize TARS WARS mission' });
+    const isConflict = error.message?.includes('already completed');
+    return res.status(isConflict ? 409 : 400).json({
+      error: error.message || 'Failed to initialize TARS WARS mission',
+      code: isConflict ? 'ATTEMPT_ALREADY_COMPLETED' : 'INIT_ERROR',
+    });
   }
 });
 

@@ -87,11 +87,33 @@ export interface AdminQuestion {
 export interface AdminAttempt {
   id: string;
   roll_number: string;
+  normalized_roll_number?: string;
+  raw_roll_number?: string;
   status: string;
   current_question_index: number;
   score: number;
+  percentage?: number;
   energy_percentage: number;
+  correct_count?: number;
+  incorrect_count?: number;
+  unanswered_count?: number;
   time_taken_seconds: number;
   started_at: string;
   completed_at: string | null;
+  updated_at?: string;
+}
+
+export interface AdminAttemptsResponse {
+  attempts: AdminAttempt[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: {
+    totalAttempts: number;
+    completedAttempts: number;
+    inProgressAttempts: number;
+    averageScore: number;
+    highestScore: number;
+  };
 }

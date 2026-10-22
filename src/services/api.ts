@@ -5,6 +5,7 @@ import {
   LeaderboardEntry,
   AdminQuestion,
   AdminAttempt,
+  AdminAttemptsResponse,
 } from '../types/index.js';
 
 const API_BASE = '/api';
@@ -245,13 +246,46 @@ class ApiService {
     return data;
   }
 
-  async adminGetAttempts(): Promise<AdminAttempt[]> {
+  async adminGetAttempts(params?: {
+    search?: string;
+    status?: string;
+    sortBy?: string;
+    sortOrder?: 'ASC' | 'DESC';
+    page?: number;
+    limit?: number;
+  }): Promise<AdminAttemptsResponse> {
     const token = this.getAdminToken();
-    const res = await fetch(`${API_BASE}/admin/attempts`, {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.status) query.set('status', params.status);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.limit) query.set('limit', String(params.limit));
+
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const res = await fetch(`${API_BASE}/admin/attempts${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load attempts');
+
+    if (Array.isArray(data)) {
+      return {
+        attempts: data,
+        total: data.length,
+        page: 1,
+        limit: data.length,
+        totalPages: 1,
+        summary: {
+          totalAttempts: data.length,
+          completedAttempts: data.filter((a: any) => a.status === 'completed').length,
+          inProgressAttempts: data.filter((a: any) => a.status === 'in_progress').length,
+          averageScore: 0,
+          highestScore: 0,
+        },
+      };
+    }
     return data;
   }
 

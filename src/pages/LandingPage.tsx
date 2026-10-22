@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Rocket, Shield, AlertCircle, ArrowRight, Zap, Clock, Terminal, ChevronRight } from 'lucide-react';
 import { TarsRobot } from '../components/TarsRobot.js';
 import { sound } from '../services/sound.js';
-import { startNewQuizSession } from '../services/quizSession.js';
+import { api } from '../services/api.js';
 
 interface LandingPageProps {
   onStartQuiz: (attemptData: {
@@ -11,6 +11,7 @@ interface LandingPageProps {
     score: number;
     energyPercentage: number;
     resumed: boolean;
+    currentQuestion?: any;
   }) => void;
   onViewLeaderboard: () => void;
   onOpenAdmin: () => void;
@@ -25,7 +26,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -44,16 +45,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       setLoading(true);
       sound.playChirp();
 
-      // Initialize fresh 20-question randomized session from the verified 200 question bank
-      const newSession = startNewQuizSession(trimmed);
+      // Authoritative persistent server start / resume
+      const result = await api.startQuiz(trimmed);
 
       sound.playCorrect();
       onStartQuiz({
-        attemptId: newSession.attemptId,
-        rollNumber: newSession.rollNumber,
-        score: newSession.score,
-        energyPercentage: newSession.energyPercentage,
-        resumed: false,
+        attemptId: result.attemptId,
+        rollNumber: result.rollNumber,
+        score: result.score,
+        energyPercentage: result.energyPercentage,
+        resumed: result.resumed,
+        currentQuestion: result.currentQuestion,
       });
     } catch (err: any) {
       sound.playWrong();
@@ -77,13 +79,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           TARS <span className="text-cyan-400 glow-text-cyan">WARS</span>
         </h1>
 
-        <h2 className="font-orbitron font-bold text-xl sm:text-2xl text-cyan-300 tracking-wide mb-3 glow-text-cyan">
+        <h2 className="font-orbitron font-bold text-xl sm:text-2xl text-cyan-300 tracking-wide mb-4 glow-text-cyan">
           ENTER THE EVENT HORIZON
         </h2>
 
-        <p className="text-base sm:text-lg text-slate-300 font-space font-light max-w-2xl mx-auto leading-relaxed">
-          Initialize the TARS quantum robot core. Answer 20 randomized high-caliber technical challenges across computer science, aerospace, and innovation to power the reactor before traversing the Gargantua black-hole singularity.
-        </p>
+        <div className="glass-panel bg-slate-950/85 backdrop-blur-md px-6 py-4 sm:py-5 rounded-2xl border border-cyan-500/30 shadow-2xl hud-corner max-w-2xl mx-auto">
+          <p className="text-sm sm:text-base text-slate-200 font-space font-light leading-relaxed">
+            Initialize the TARS quantum robot core. Answer 20 randomized high-caliber technical challenges across computer science, aerospace, and innovation to power the reactor before traversing the Gargantua black-hole singularity.
+          </p>
+        </div>
       </div>
 
       {/* Main Grid: Pilot Entry Panel + TARS Standby Companion */}

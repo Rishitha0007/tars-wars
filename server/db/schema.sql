@@ -1,5 +1,5 @@
 -- TARS WARS Universal Relational Database Schema
--- Compatible with SQLite and PostgreSQL
+-- Local self-hosted SQLite Database for College Technical Fest
 
 CREATE TABLE IF NOT EXISTS fest_settings (
   key TEXT PRIMARY KEY,
@@ -21,16 +21,24 @@ CREATE TABLE IF NOT EXISTS questions (
 
 CREATE TABLE IF NOT EXISTS attempts (
   id TEXT PRIMARY KEY,
-  roll_number TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'in_progress', -- 'in_progress', 'completed', 'abandoned'
+  normalized_roll_number TEXT NOT NULL UNIQUE,
+  raw_roll_number TEXT NOT NULL,
+  roll_number TEXT NOT NULL, -- Compatibility alias
+  status TEXT NOT NULL DEFAULT 'in_progress', -- 'in_progress', 'completed', 'expired'
   current_question_index INTEGER DEFAULT 0,
   score INTEGER DEFAULT 0,
+  percentage REAL DEFAULT 0.0,
   energy_percentage INTEGER DEFAULT 0,
+  correct_count INTEGER DEFAULT 0,
+  incorrect_count INTEGER DEFAULT 0,
+  unanswered_count INTEGER DEFAULT 0,
+  assigned_question_ids TEXT, -- JSON array of assigned 20 question IDs in order
   started_at TEXT NOT NULL,
   completed_at TEXT,
   time_taken_seconds INTEGER DEFAULT 0,
   metadata TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS attempt_responses (
@@ -52,7 +60,8 @@ CREATE TABLE IF NOT EXISTS attempt_responses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_active ON questions(is_active);
-CREATE INDEX IF NOT EXISTS idx_attempts_roll ON attempts(roll_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attempts_normalized_roll ON attempts(normalized_roll_number);
 CREATE INDEX IF NOT EXISTS idx_attempts_status ON attempts(status);
 CREATE INDEX IF NOT EXISTS idx_attempts_leaderboard ON attempts(status, score DESC, time_taken_seconds ASC, completed_at ASC);
 CREATE INDEX IF NOT EXISTS idx_attempt_responses_attempt_seq ON attempt_responses(attempt_id, sequence_number);
+

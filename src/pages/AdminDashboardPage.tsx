@@ -53,8 +53,31 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onReturn
   const [showImportModal, setShowImportModal] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
 
-  // Attempts state
+  // Attempts state with pagination, search, sort, and metrics (supports up to 1,000 records)
   const [attempts, setAttempts] = useState<AdminAttempt[]>([]);
+  const [attemptsTotal, setAttemptsTotal] = useState(0);
+  const [attemptsPage, setAttemptsPage] = useState(1);
+  const [attemptsLimit, setAttemptsLimit] = useState(25);
+  const [attemptsTotalPages, setAttemptsTotalPages] = useState(1);
+  const [attemptsSearch, setAttemptsSearch] = useState('');
+  const [attemptsStatus, setAttemptsStatus] = useState('all');
+  const [attemptsSortBy, setAttemptsSortBy] = useState('started_at');
+  const [attemptsSortOrder, setAttemptsSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+  const [attemptsLoading, setAttemptsLoading] = useState(false);
+  const [attemptsError, setAttemptsError] = useState<string | null>(null);
+  const [attemptsSummary, setAttemptsSummary] = useState<{
+    totalAttempts: number;
+    completedAttempts: number;
+    inProgressAttempts: number;
+    averageScore: number;
+    highestScore: number;
+  }>({
+    totalAttempts: 0,
+    completedAttempts: 0,
+    inProgressAttempts: 0,
+    averageScore: 0,
+    highestScore: 0,
+  });
 
   // Settings state
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -97,21 +120,57 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onReturn
     sound.playChirp();
   };
 
-  // Load Data
+  // Dedicated Attempts Fetcher
+  const fetchAttempts = async (page = attemptsPage, limit = attemptsLimit, search = attemptsSearch, status = attemptsStatus, sortBy = attemptsSortBy, sortOrder = attemptsSortOrder) => {
+    if (!token) return;
+    try {
+      setAttemptsLoading(true);
+      setAttemptsError(null);
+      const res = await api.adminGetAttempts({
+        page,
+        limit,
+        search,
+        status,
+        sortBy,
+        sortOrder,
+      });
+      setAttempts(res.attempts);
+      setAttemptsTotal(res.total);
+      setAttemptsPage(res.page);
+      setAttemptsLimit(res.limit);
+      setAttemptsTotalPages(res.totalPages);
+      if (res.summary) {
+        setAttemptsSummary(res.summary);
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Unauthorized')) {
+        handleLogout();
+        return;
+      }
+      setAttemptsError('Failed to fetch participant telemetry from backend server.');
+    } finally {
+      setAttemptsLoading(false);
+    }
+  };
+
+  // Load Data on Initial Login
   const loadData = async () => {
     if (!token) return;
     try {
       setLoading(true);
-      const [qData, attData, settsData] = await Promise.all([
-        api.adminGetQuestions(),
-        api.adminGetAttempts(),
-        api.adminGetSettings(),
+      const [qData, settsData] = await Promise.all([
+        api.adminGetQuestions().catch(() => null),
+        api.adminGetSettings().catch(() => null),
       ]);
-      setQuestions(qData.questions);
-      setTotalQuestions(qData.total);
-      setActiveCount(qData.activeCount);
-      setAttempts(attData);
-      setSettings(settsData);
+      if (qData) {
+        setQuestions(qData.questions);
+        setTotalQuestions(qData.total);
+        setActiveCount(qData.activeCount);
+      }
+      if (settsData) {
+        setSettings(settsData);
+      }
+      await fetchAttempts(1, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
     } catch (err: any) {
       if (err.message?.includes('Unauthorized')) {
         handleLogout();
@@ -333,7 +392,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onReturn
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Default: interstellar2026"
+                placeholder="Enter flight command key"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs focus:border-cyan-400 outline-none"
                 required
               />
@@ -642,73 +701,316 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onReturn
       )}
 
       {/* ============================================================= */}
-      {/* TAB 2: ATTEMPTS OVERSIGHT */}
+      {/* TAB 2: ATTEMPTS OVERSIGHT (PAGINATED UP TO 1,000 PARTICIPANTS) */}
       {/* ============================================================= */}
       {activeTab === 'attempts' && (
-        <div className="glass-panel p-6 rounded-2xl border border-cyan-500/20">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
-            <h2 className="font-orbitron font-bold text-base text-slate-100">
-              ALL PARTICIPANT ATTEMPTS
-            </h2>
-            <span className="text-xs font-mono text-slate-400">{attempts.length} RECORDS</span>
+        <div className="space-y-6">
+          {/* Telemetry Metrics Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+            <div className="glass-panel p-4 rounded-xl border border-cyan-500/20">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                TOTAL ATTEMPTS
+              </span>
+              <span className="font-orbitron font-bold text-xl text-slate-100">
+                {attemptsSummary.totalAttempts || attemptsTotal}
+              </span>
+            </div>
+            <div className="glass-panel p-4 rounded-xl border border-emerald-500/20">
+              <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider block mb-1">
+                COMPLETED
+              </span>
+              <span className="font-orbitron font-bold text-xl text-emerald-300">
+                {attemptsSummary.completedAttempts}
+              </span>
+            </div>
+            <div className="glass-panel p-4 rounded-xl border border-cyan-500/20">
+              <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider block mb-1">
+                IN-FLIGHT
+              </span>
+              <span className="font-orbitron font-bold text-xl text-cyan-300">
+                {attemptsSummary.inProgressAttempts}
+              </span>
+            </div>
+            <div className="glass-panel p-4 rounded-xl border border-blue-500/20">
+              <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider block mb-1">
+                AVG SCORE
+              </span>
+              <span className="font-orbitron font-bold text-xl text-blue-300">
+                {attemptsSummary.averageScore ? `${attemptsSummary.averageScore}/20` : '0/20'}
+              </span>
+            </div>
+            <div className="glass-panel p-4 rounded-xl border border-amber-500/20 col-span-2 sm:col-span-1">
+              <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block mb-1">
+                PEAK SCORE
+              </span>
+              <span className="font-orbitron font-bold text-xl text-amber-300">
+                {attemptsSummary.highestScore ? `${attemptsSummary.highestScore}/20` : '0/20'}
+              </span>
+            </div>
           </div>
 
-          {attempts.length === 0 ? (
-            <p className="text-center py-12 text-xs font-mono text-slate-500">
-              No participant attempts recorded yet.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px]">
-                    <th className="py-2.5 px-3">ROLL NUMBER</th>
-                    <th className="py-2.5 px-3">STATUS</th>
-                    <th className="py-2.5 px-3 text-center">SCORE</th>
-                    <th className="py-2.5 px-3 text-center">ENERGY</th>
-                    <th className="py-2.5 px-3">DURATION</th>
-                    <th className="py-2.5 px-3">TIMESTAMP</th>
-                    <th className="py-2.5 px-3 text-right">ACTION</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {attempts.map((att) => (
-                    <tr key={att.id} className="hover:bg-slate-900/60">
-                      <td className="py-3 px-3 font-bold text-slate-200">{att.roll_number}</td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            att.status === 'completed'
-                              ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800'
-                              : 'bg-cyan-950/60 text-cyan-300 border border-cyan-800 animate-pulse'
-                          }`}
-                        >
-                          {att.status.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-center font-bold text-cyan-300">
-                        {att.score}/20
-                      </td>
-                      <td className="py-3 px-3 text-center">{att.energy_percentage}%</td>
-                      <td className="py-3 px-3 text-slate-400">{att.time_taken_seconds}s</td>
-                      <td className="py-3 px-3 text-slate-500 text-[11px]">
-                        {new Date(att.started_at).toLocaleTimeString()}
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <button
-                          onClick={() => handleResetAttempt(att.id, att.roll_number)}
-                          className="px-2.5 py-1 rounded bg-rose-950/40 border border-rose-800/60 text-rose-300 hover:bg-rose-900/60 text-[10px] font-mono"
-                          title="Clear this attempt to allow a retake"
-                        >
-                          RESET ATTEMPT
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Main Attempts Panel */}
+          <div className="glass-panel p-6 rounded-2xl border border-cyan-500/20">
+            {/* Header and Controls */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800 mb-4">
+              <div>
+                <h2 className="font-orbitron font-bold text-base text-slate-100 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-cyan-400" />
+                  PARTICIPANT TELEMETRY OVERSIGHT
+                </h2>
+                <p className="text-xs font-mono text-slate-400 mt-0.5">
+                  Authoritative persistent SQLite records ({attemptsTotal} total matching)
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search Bar */}
+                <div className="relative min-w-[200px]">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={attemptsSearch}
+                    onChange={(e) => {
+                      setAttemptsSearch(e.target.value);
+                      fetchAttempts(1, attemptsLimit, e.target.value, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                    }}
+                    placeholder="Search roll number..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 outline-none focus:border-cyan-400"
+                  />
+                </div>
+
+                {/* Status Filter */}
+                <select
+                  value={attemptsStatus}
+                  onChange={(e) => {
+                    setAttemptsStatus(e.target.value);
+                    fetchAttempts(1, attemptsLimit, attemptsSearch, e.target.value, attemptsSortBy, attemptsSortOrder);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-300 outline-none focus:border-cyan-400"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="completed">Completed Only</option>
+                  <option value="in_progress">In-Progress Only</option>
+                </select>
+
+                {/* Sort Option */}
+                <select
+                  value={attemptsSortBy}
+                  onChange={(e) => {
+                    setAttemptsSortBy(e.target.value);
+                    fetchAttempts(1, attemptsLimit, attemptsSearch, attemptsStatus, e.target.value, attemptsSortOrder);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-300 outline-none focus:border-cyan-400"
+                >
+                  <option value="started_at">Started Time</option>
+                  <option value="completed_at">Completed Time</option>
+                  <option value="score">Score</option>
+                  <option value="roll_number">Roll Number</option>
+                  <option value="time_taken_seconds">Duration</option>
+                </select>
+
+                {/* Sort Direction Toggle */}
+                <button
+                  onClick={() => {
+                    const newDir = attemptsSortOrder === 'DESC' ? 'ASC' : 'DESC';
+                    setAttemptsSortOrder(newDir);
+                    fetchAttempts(attemptsPage, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, newDir);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-300 hover:border-cyan-400"
+                  title="Toggle ascending / descending"
+                >
+                  {attemptsSortOrder}
+                </button>
+
+                {/* Page Limit */}
+                <select
+                  value={attemptsLimit}
+                  onChange={(e) => {
+                    const l = parseInt(e.target.value, 10);
+                    setAttemptsLimit(l);
+                    fetchAttempts(1, l, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-300 outline-none focus:border-cyan-400"
+                >
+                  <option value="25">25 / page</option>
+                  <option value="50">50 / page</option>
+                  <option value="100">100 / page</option>
+                </select>
+
+                {/* Manual Refresh Button */}
+                <button
+                  onClick={() => {
+                    sound.playChirp();
+                    fetchAttempts(attemptsPage, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                  }}
+                  disabled={attemptsLoading}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/60 text-xs font-mono flex items-center gap-1.5 cursor-pointer"
+                  title="Reload participant records from backend"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${attemptsLoading ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">REFRESH</span>
+                </button>
+              </div>
             </div>
-          )}
+
+            {/* Error Message if Fetch Fails */}
+            {attemptsError && (
+              <div className="mb-4 p-3 rounded-lg bg-rose-950/80 border border-rose-500/60 text-rose-200 text-xs font-mono flex items-center justify-between">
+                <span>{attemptsError}</span>
+                <button
+                  onClick={() => fetchAttempts()}
+                  className="underline hover:text-rose-100 ml-2"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Table */}
+            {attemptsLoading ? (
+              <div className="text-center py-16">
+                <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                <p className="text-xs font-mono text-cyan-400">QUERYING ORBITAL TELEMETRY RECORDS...</p>
+              </div>
+            ) : attempts.length === 0 ? (
+              <div className="text-center py-16 text-slate-500 font-mono text-xs">
+                <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                <p>No participant attempts match the specified query.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                      <th className="py-2.5 px-3">PILOT ROLL NUMBER</th>
+                      <th className="py-2.5 px-3">STATUS</th>
+                      <th className="py-2.5 px-3 text-center">SCORE & %</th>
+                      <th className="py-2.5 px-3 text-center">ENERGY</th>
+                      <th className="py-2.5 px-3">ACCURACY (C / I / U)</th>
+                      <th className="py-2.5 px-3">DURATION</th>
+                      <th className="py-2.5 px-3">TIMESTAMPS</th>
+                      <th className="py-2.5 px-3 text-right">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {attempts.map((att) => {
+                      const normalized = att.normalized_roll_number || att.roll_number;
+                      const raw = att.raw_roll_number;
+                      const hasRawDiff = raw && raw !== normalized;
+                      const pct = att.percentage != null
+                        ? Number(att.percentage).toFixed(0)
+                        : Math.round((att.score / 20) * 100);
+
+                      return (
+                        <tr key={att.id} className="hover:bg-slate-900/60 transition-colors">
+                          <td className="py-3 px-3">
+                            <span className="font-bold text-slate-100 block">{normalized}</span>
+                            {hasRawDiff && (
+                              <span className="text-[10px] text-slate-500 block">Raw: {raw}</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                att.status === 'completed'
+                                  ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800'
+                                  : 'bg-cyan-950/60 text-cyan-300 border border-cyan-800 animate-pulse'
+                              }`}
+                            >
+                              {att.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className="font-bold text-cyan-300">{att.score}/20</span>
+                            <span className="text-[10px] text-slate-400 block">({pct}%)</span>
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-amber-300">
+                            {att.energy_percentage}%
+                          </td>
+                          <td className="py-3 px-3 text-slate-300 text-[11px]">
+                            <span className="text-emerald-400 font-bold">{att.correct_count ?? att.score}C</span>
+                            {' / '}
+                            <span className="text-rose-400">{att.incorrect_count ?? 0}I</span>
+                            {' / '}
+                            <span className="text-slate-400">{att.unanswered_count ?? 0}U</span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-400">{att.time_taken_seconds}s</td>
+                          <td className="py-3 px-3 text-slate-400 text-[11px]">
+                            <div>
+                              <span className="text-slate-500">Start:</span>{' '}
+                              {att.started_at ? new Date(att.started_at).toLocaleTimeString() : 'N/A'}
+                            </div>
+                            {att.completed_at && (
+                              <div>
+                                <span className="text-slate-500">End:</span>{' '}
+                                {new Date(att.completed_at).toLocaleTimeString()}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              onClick={async () => {
+                                await handleResetAttempt(att.id, normalized);
+                                fetchAttempts(attemptsPage, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                              }}
+                              className="px-2.5 py-1 rounded bg-rose-950/40 border border-rose-800/60 text-rose-300 hover:bg-rose-900/60 text-[10px] font-mono cursor-pointer"
+                              title="Clear this attempt to allow a retake"
+                            >
+                              RESET ATTEMPT
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {attemptsTotalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800 mt-4 text-xs font-mono">
+                <span className="text-slate-400">
+                  Showing {(attemptsPage - 1) * attemptsLimit + 1} to{' '}
+                  {Math.min(attemptsPage * attemptsLimit, attemptsTotal)} of {attemptsTotal} records
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      if (attemptsPage > 1) {
+                        const p = attemptsPage - 1;
+                        setAttemptsPage(p);
+                        fetchAttempts(p, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                      }
+                    }}
+                    disabled={attemptsPage <= 1}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:border-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    PREV
+                  </button>
+
+                  <span className="px-3 py-1.5 text-cyan-400 font-bold">
+                    PAGE {attemptsPage} OF {attemptsTotalPages}
+                  </span>
+
+                  <button
+                    onClick={() => {
+                      if (attemptsPage < attemptsTotalPages) {
+                        const p = attemptsPage + 1;
+                        setAttemptsPage(p);
+                        fetchAttempts(p, attemptsLimit, attemptsSearch, attemptsStatus, attemptsSortBy, attemptsSortOrder);
+                      }
+                    }}
+                    disabled={attemptsPage >= attemptsTotalPages}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:border-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    NEXT
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

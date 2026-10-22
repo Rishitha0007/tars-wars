@@ -33,8 +33,8 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
   onViewLeaderboard,
   onReturnHome,
 }) => {
-  const [results, setResults] = useState<QuizResults | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [results, setResults] = useState<QuizResults | null>(() => propResults || getLastResults() || null);
+  const [loading, setLoading] = useState<boolean>(() => !propResults && !getLastResults() && Boolean(attemptId));
   const [error, setError] = useState<string | null>(null);
   const [showReview, setShowReview] = useState<boolean>(false);
 
@@ -44,12 +44,19 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
       setResults(propResults);
       setLoading(false);
       sound.playVictory();
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
-      });
+      try {
+        localStorage.setItem('tars_wars_last_results', JSON.stringify(propResults));
+      } catch {}
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
+        });
+      } catch (e) {
+        console.warn('Confetti effect failed', e);
+      }
       return;
     }
 
@@ -59,12 +66,16 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
       setResults(storedLast);
       setLoading(false);
       sound.playVictory();
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
-      });
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
+        });
+      } catch (e) {
+        console.warn('Confetti effect failed', e);
+      }
       return;
     }
 
@@ -76,12 +87,19 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           const data = await api.getResults(attemptId);
           setResults(data);
           sound.playVictory();
-          confetti({
-            particleCount: 80,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
-          });
+          try {
+            localStorage.setItem('tars_wars_last_results', JSON.stringify(data));
+          } catch {}
+          try {
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 },
+              colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
+            });
+          } catch (e) {
+            console.warn('Confetti effect failed', e);
+          }
         } else {
           setError('Complete a 20-question quantum mission to generate your debriefing report.');
         }
@@ -127,22 +145,24 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
   }
 
   // Rank Title
+  const userScore = results?.score ?? 0;
   let rankTier = 'EXPLORATION CADET';
   let rankColor = 'text-slate-300 border-slate-700 bg-slate-900';
-  if (results.score >= 18) {
+  if (userScore >= 18) {
     rankTier = 'SINGULARITY COMMANDER';
     rankColor = 'text-amber-300 border-amber-500/50 bg-amber-950/40 shadow-[0_0_15px_rgba(251,191,36,0.3)]';
-  } else if (results.score >= 14) {
+  } else if (userScore >= 14) {
     rankTier = 'ORBITAL FLIGHT SPECIALIST';
     rankColor = 'text-cyan-300 border-cyan-500/50 bg-cyan-950/40 shadow-[0_0_15px_rgba(0,229,255,0.3)]';
-  } else if (results.score >= 10) {
+  } else if (userScore >= 10) {
     rankTier = 'MISSION NAVIGATOR';
     rankColor = 'text-sky-300 border-sky-500/50 bg-sky-950/40';
   }
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+  const formatDuration = (seconds?: number | null) => {
+    const totalSecs = Math.max(0, Math.floor(seconds || 0));
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
     return `${mins}m ${secs}s`;
   };
 
@@ -310,7 +330,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            {results.breakdown.map((item) => (
+            {(results.breakdown || []).map((item) => (
               <div
                 key={item.sequence}
                 className={`p-5 rounded-xl border text-sm transition-all ${
