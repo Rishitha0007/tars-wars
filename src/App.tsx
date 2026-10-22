@@ -6,9 +6,6 @@ import { QuizMissionPage } from './pages/QuizMissionPage.js';
 import { ResultsPage } from './pages/ResultsPage.js';
 import { LeaderboardPage } from './pages/LeaderboardPage.js';
 import { AdminDashboardPage } from './pages/AdminDashboardPage.js';
-import { QuestionClient } from './types/index.js';
-import { api } from './services/api.js';
-
 import { getActiveQuizSession } from './services/quizSession.js';
 
 export const App: React.FC = () => {

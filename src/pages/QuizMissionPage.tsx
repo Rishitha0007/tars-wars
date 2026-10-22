@@ -4,7 +4,6 @@ import {
   XCircle,
   ArrowRight,
   Shield,
-  Zap,
   RotateCcw,
   AlertCircle,
   HelpCircle,

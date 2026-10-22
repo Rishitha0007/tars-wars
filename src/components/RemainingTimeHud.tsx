@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Activity, AlertTriangle } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
 interface RemainingTimeHudProps {
   initialSeconds?: number;

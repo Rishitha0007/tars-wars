@@ -45,7 +45,7 @@ router.post('/start', (req: Request, res: Response) => {
 // 2. Get current attempt state and active question
 router.get('/attempt/:attemptId', (req: Request, res: Response) => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = String(req.params.attemptId);
     const attempt = db.getAttemptById(attemptId);
     if (!attempt) {
       return res.status(404).json({ error: 'Mission attempt not found' });
@@ -80,7 +80,7 @@ router.get('/attempt/:attemptId', (req: Request, res: Response) => {
 // 3. Submit an answer for the current question
 router.post('/attempt/:attemptId/submit', (req: Request, res: Response) => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = String(req.params.attemptId);
     const { sequenceNumber, selectedOptionIndex } = req.body;
 
     if (typeof sequenceNumber !== 'number' || typeof selectedOptionIndex !== 'number') {
@@ -101,7 +101,7 @@ router.post('/attempt/:attemptId/submit', (req: Request, res: Response) => {
 // 4. Record question timeout
 router.post('/attempt/:attemptId/timeout', (req: Request, res: Response) => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = String(req.params.attemptId);
     const { sequenceNumber } = req.body;
 
     if (typeof sequenceNumber !== 'number') {
@@ -118,7 +118,7 @@ router.post('/attempt/:attemptId/timeout', (req: Request, res: Response) => {
 // 5. Advance to the next question (called during/after paper rocket transition)
 router.post('/attempt/:attemptId/next', (req: Request, res: Response) => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = String(req.params.attemptId);
     const result = db.advanceToNextQuestion(attemptId);
     return res.status(200).json({
       success: true,
@@ -133,7 +133,7 @@ router.post('/attempt/:attemptId/next', (req: Request, res: Response) => {
 // 6. Get final mission results and debriefing
 router.get('/attempt/:attemptId/results', (req: Request, res: Response) => {
   try {
-    const { attemptId } = req.params;
+    const attemptId = String(req.params.attemptId);
     const results = db.getAttemptResults(attemptId);
     if (!results) {
       return res.status(404).json({ error: 'Results not found for this attempt' });

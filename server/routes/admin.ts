@@ -81,7 +81,7 @@ router.post('/questions', (req: AdminAuthRequest, res: Response) => {
 
 router.put('/questions/:id', (req: AdminAuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const { question_text, options, correct_option_index, explanation, category, difficulty, is_active } = req.body;
 
     const updated = db.updateQuestion(id, {
@@ -106,7 +106,7 @@ router.put('/questions/:id', (req: AdminAuthRequest, res: Response) => {
 
 router.delete('/questions/:id', (req: AdminAuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const success = db.deleteQuestion(id);
     if (!success) {
       return res.status(404).json({ error: 'Question not found' });
@@ -119,7 +119,7 @@ router.delete('/questions/:id', (req: AdminAuthRequest, res: Response) => {
 
 router.patch('/questions/:id/toggle', (req: AdminAuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const { is_active } = req.body;
     if (typeof is_active !== 'boolean') {
       return res.status(400).json({ error: 'is_active boolean required' });
@@ -180,7 +180,7 @@ router.get('/attempts', (req: AdminAuthRequest, res: Response) => {
 
 router.delete('/attempts/:id', (req: AdminAuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const success = db.resetAttempt(id);
     if (!success) {
       return res.status(404).json({ error: 'Attempt not found' });

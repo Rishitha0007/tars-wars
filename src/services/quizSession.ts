@@ -207,14 +207,14 @@ export function addLeaderboardEntry(entry: LeaderboardEntry): LeaderboardEntry[]
 }
 
 /**
- * Retrieves the local demo leaderboard from browser storage
+ * Retrieves the local leaderboard from browser storage (genuine participant attempts only)
  */
 export function getLocalLeaderboard(): LeaderboardEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_LEADERBOARD);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
@@ -222,48 +222,6 @@ export function getLocalLeaderboard(): LeaderboardEntry[] {
     console.warn('Failed to load local leaderboard', e);
   }
 
-  // Initial curated local benchmark entries if none yet
-  const defaultEntries: LeaderboardEntry[] = [
-    {
-      rank: 1,
-      id: 'bench-1',
-      rollNumber: '21BCE0491',
-      rawRollNumber: '21BCE0491',
-      score: 19,
-      totalQuestions: 20,
-      energyPercentage: 95,
-      timeTakenSeconds: 320,
-      completedAt: new Date(Date.now() - 3600000).toISOString(),
-    },
-    {
-      rank: 2,
-      id: 'bench-2',
-      rollNumber: '21BCE1042',
-      rawRollNumber: '21BCE1042',
-      score: 18,
-      totalQuestions: 20,
-      energyPercentage: 90,
-      timeTakenSeconds: 385,
-      completedAt: new Date(Date.now() - 7200000).toISOString(),
-    },
-    {
-      rank: 3,
-      id: 'bench-3',
-      rollNumber: '21BIT0234',
-      rawRollNumber: '21BIT0234',
-      score: 17,
-      totalQuestions: 20,
-      energyPercentage: 85,
-      timeTakenSeconds: 410,
-      completedAt: new Date(Date.now() - 10800000).toISOString(),
-    },
-  ];
-
-  try {
-    localStorage.setItem(STORAGE_KEY_LEADERBOARD, JSON.stringify(defaultEntries));
-  } catch (e) {
-    // Ignore
-  }
-
-  return defaultEntries;
+  return [];
 }
+

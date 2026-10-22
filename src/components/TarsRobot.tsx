@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Shield, Cpu, Activity, Sparkles } from 'lucide-react';
+import { Zap, Cpu } from 'lucide-react';
 
 export type TarsState = 'idle' | 'dancing' | 'collapsing';
 

@@ -19,7 +19,6 @@ import { TarsRobot } from '../components/TarsRobot.js';
 import { api } from '../services/api.js';
 import { sound } from '../services/sound.js';
 import { getLastResults } from '../services/quizSession.js';
-import { QUESTION_BANK } from '../data/questions.js';
 
 interface ResultsPageProps {
   attemptId?: string | null;
@@ -69,57 +68,27 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
       return;
     }
 
-    // 3. Fallback to API if attemptId provided, or build sample from verified QUESTION_BANK
+    // 3. Attempt to fetch from API if attemptId provided
     const fetchResults = async () => {
       try {
         setLoading(true);
         if (attemptId) {
           const data = await api.getResults(attemptId);
           setResults(data);
+          sound.playVictory();
+          confetti({
+            particleCount: 80,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
+          });
         } else {
-          throw new Error('No attempt ID found');
+          setError('Complete a 20-question quantum mission to generate your debriefing report.');
         }
       } catch (err: any) {
-        // Safe sample breakdown from real verified questions
-        const sampleBreakdown = QUESTION_BANK.slice(0, 20).map((q, idx) => ({
-          sequence: idx + 1,
-          questionText: q.questionText,
-          category: q.category,
-          options: q.options,
-          selectedOptionIndex: idx < 16 ? q.correctOptionIndex : (idx === 19 ? null : (q.correctOptionIndex + 1) % 4),
-          selectedOptionText: idx < 16 ? q.options[q.correctOptionIndex] : (idx === 19 ? '[UNANSWERED]' : q.options[(q.correctOptionIndex + 1) % 4]),
-          correctOptionIndex: q.correctOptionIndex,
-          correctOptionText: q.options[q.correctOptionIndex],
-          isCorrect: idx < 16,
-          isUnanswered: idx === 19,
-          explanation: q.explanation,
-          timeTakenSeconds: 15,
-        }));
-
-        setResults({
-          attemptId: 'demo_session',
-          rollNumber: localStorage.getItem('tars_wars_pilot_roll') || '21BCE1042',
-          status: 'completed',
-          score: 16,
-          totalQuestions: 20,
-          energyPercentage: 80,
-          timeTakenSeconds: 320,
-          correctCount: 16,
-          incorrectCount: 3,
-          unansweredCount: 1,
-          startedAt: new Date(Date.now() - 320000).toISOString(),
-          completedAt: new Date().toISOString(),
-          breakdown: sampleBreakdown,
-        });
+        setError(err?.message || 'No completed mission found. Complete a mission to view your debriefing report.');
       } finally {
         setLoading(false);
-        sound.playVictory();
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#00e5ff', '#38bdf8', '#fbbf24', '#ffffff'],
-        });
       }
     };
 
@@ -139,13 +108,18 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
 
   if (error || !results) {
     return (
-      <div className="relative z-10 max-w-lg mx-auto p-8 glass-panel rounded-2xl border border-rose-500/40 text-center my-12">
-        <XCircle className="w-12 h-12 text-rose-400 mx-auto mb-4" />
+      <div className="relative z-10 max-w-lg mx-auto p-8 glass-panel rounded-2xl border border-cyan-500/30 text-center my-12 shadow-2xl">
+        <XCircle className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
         <h2 className="font-orbitron font-bold text-xl text-slate-100 mb-2">
-          DEBRIEFING RETRIEVAL FAILED
+          NO ACTIVE MISSION DEBRIEFING
         </h2>
-        <p className="text-slate-400 font-space text-sm mb-6">{error}</p>
-        <button onClick={onReturnHome} className="btn-primary py-2.5 px-6 rounded-xl text-sm">
+        <p className="text-slate-400 font-space text-sm mb-6 leading-relaxed">
+          {error || 'Complete a 20-question quantum mission to generate your telemetry debriefing report.'}
+        </p>
+        <button
+          onClick={onReturnHome}
+          className="btn-primary py-2.5 px-6 rounded-xl text-sm cursor-pointer shadow-lg"
+        >
           Return to Command
         </button>
       </div>
