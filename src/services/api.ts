@@ -8,8 +8,7 @@ import {
   AdminAttemptsResponse,
 } from '../types/index.js';
 
-const API_BASE = '/api';
-
+const API_BASE = 'https://tars-wars.onrender.com/api';
 class ApiService {
   private getAdminToken(): string | null {
     return localStorage.getItem('tars_wars_admin_token');
